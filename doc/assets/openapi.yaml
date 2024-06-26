@@ -1,0 +1,999 @@
+openapi: 3.1.0
+
+info:
+  title: Authorization & PSD2 APIs
+  version: 1.0.0
+
+servers:
+  - url: https://openauth.lydia-app.com
+    description: Authorization API server
+  - url: https://openbanking.lydia-app.com:8082
+    description: Authorization API server with mTLS
+  - url: https://openbanking.lydia-app.com:8083
+    description: PSD2 API server
+
+paths:
+  /authorization/login:
+    get:
+      tags:
+        - authorization
+      summary: Initiate a PSU authorization flow.
+      description: |
+        Redirect the incomming request to the Lydia app to start a PSD2 authorization flow.
+        The redirect URL depends on the request User-Agent header, which can be overrided using the query parameter user_agent.
+      parameters:
+        - name: client_id
+          in: query
+          description: Unique TPP identifier, provided by Lydia.
+          required: true
+          schema:
+            type: string
+        - name: redirect_uri
+          in: query
+          description: Must match one of the redirect uri the TPP provided to Lydia.
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          description: For TPP usage, state will forwarded to authorization flow steps.
+          schema:
+            type: string
+        - name: scope
+          in: query
+          required: true
+          description: List of desired scopes separated by spaces.
+          schema:
+            type: string
+            examples:
+              - "aisp pisp cbpii"
+        - name: consent_request_id
+          in: query
+          required: false
+          description: In PIS flow, TPP can retrieve the consent request using this query parameter.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '302':
+          description: Redirect the request to the deeplink stored in the Location header.
+          headers:
+            Location:
+              description: Link to start the authorization process.
+              schema:
+                type: string
+        '400':
+          description: One of the required parameter is missing or empty.
+          content:
+            text/plain:
+              schema:
+                type: string
+                examples:
+                  - 'invalid_request: missing parameter client_id'
+        '405':
+          description: Method not allowed.
+    servers:
+      - url: https://openauth.lydia-app.com
+
+  /openbanking/oauth/v2/token:
+    post:
+      tags:
+        - authorization
+      summary: OAuth2 token endpoint
+      description: |
+        Oauth2 token endpoint usable only by a third party provider registred in our system.
+        The endpoint provide access_token & refresh_token for PSD2 feature usage only.
+        The endpoint support the following grant types:
+          - Authorization Code
+          - Client Credentials
+          - Refresh Token
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/OAuthAuthorizationCode"
+                - $ref: "#/components/schemas/OAuthClientCredentials"
+                - $ref: "#/components/schemas/OAuthRefreshToken"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthToken"
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal Server Error
+      security:
+        - mTLS: []
+    servers:
+      - url: https://openbanking.lydia-app.com:8082
+
+  /aisp/accounts:
+    get:
+      tags:
+        - ais
+      operationId: getAccountList
+      summary: Retrieve PSU account list.
+      responses:
+        '200':
+          $ref: '#/components/responses/AccountList'
+        '401':
+          description: Unauthorized
+          content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error
+      security:
+        - mTLS: []
+        - psu_oauth:
+          - aisp
+    servers:
+      - url: https://openbanking.lydia-app.com:8083
+
+  /aisp/end-user-identity:
+    get:
+      tags:
+        - ais
+      operationId: getEndUserIdentity
+      summary: Retrieve PSU identity.
+      responses:
+        '200':
+          $ref: '#/components/responses/EndUserIdentity'
+        '401':
+          description: Unauthorized
+          content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error
+      security:
+        - mTLS: []
+        - psu_oauth:
+          - aisp
+    servers:
+      - url: https://openbanking.lydia-app.com:8083
+
+  /aisp/accounts/{accountResourceId}/transactions:
+    get:
+      tags:
+        - ais
+      operationId: getTransactionList
+      summary: Retrieve PSU transaction list by account.
+      parameters:
+        - name: accountResourceId
+          in: path
+          required: true
+          description: The account identifier, as resourceId
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: size
+          in: query
+          required: false
+          description: Default to 50, maximum 500
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          required: false
+          description: From transaction creation date, RFC3339
+          schema:
+            type: string
+          example: 2024-01-04T17%3A00%3A57%2B01
+        - name: dateTo
+          in: query
+          required: false
+          description: To transaction creation date, RFC3339
+          schema:
+            type: string
+          example: 2024-01-04T17%3A00%3A57%2B01
+      responses:
+        '200':
+          $ref: '#/components/responses/TransactionList'
+        '400':
+          description: The request was unacceptable, often due to missing a required parameter or a parameter with invalid format.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Provided authorization token do not exists or has expired.
+        '404':
+          description: Account resource do not exists or do not belongs to the authentified PSU.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Account type not supported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error
+      security:
+        - mTLS: []
+        - psu_oauth:
+          - aisp
+    servers:
+      - url: https://openbanking.lydia-app.com:8083
+
+  /cbpii/funds-confirmations:
+    post:
+      tags:
+        - cbpii
+      description: Check funds availability of a specific PSU account.
+      operationId: getFundsConfirmation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FundsConfirmations'
+      responses:
+        '200':
+          $ref: '#/components/responses/FundsConfirmations'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal Server Error
+      security:
+        - mTLS: []
+        - psu_oauth:
+          - cbpii
+
+  /pisp/public/payment-requests:
+    post:
+      tags:
+        - pisp
+      summary: Initiate a new payment request.
+      operationId: post-pisp-payment-requests
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+            examples:
+              Example 1:
+                value:
+                  paymentInformationId: 7903209c-0aeb-4178-aa28-246b4d037aec
+                  creationDateTime: '2019-08-24T14:15:22Z'
+                  numberOfTransactions: 1
+                  paymentInformationStatus: ACSP
+                  initiatingParty:
+                    name: Mr Foo
+                  paymentTypeInformation:
+                    serviceLevel: SEPA
+                    categoryPurpose: CASH
+                    localInstrument: INST
+                  debtor:
+                    name: Mr Bar
+                  debtorAccount:
+                    iban: FR8217598000010000BAR000026
+                  creditTransferTransaction:
+                    - paymentId:
+                        instructionId: 13ca1f9f-d1ea-442f-a91c-5b92057f63b7
+                        endToEndId: ZA90RH72
+                      transactionStatus: ACSP
+                      instructedAmount:
+                        amount: 13.37
+                        currency: EUR
+                      beneficiary:
+                        creditor:
+                          name: Mr Bar
+                        creditorAccount:
+                          iban: FR8217598000010000BAR000026
+                      remittanceInformation:
+                        unstructured:
+                          - UNSTR_INFO
+                  supplementaryData:
+                    acceptedAuthenticationApproach:
+                      - REDIRECT
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appliedAuthenticationApproach:
+                    type: string
+                    enum:
+                    - REDIRECT
+                  _links:
+                    type: object
+                    properties:
+                      consentApproval:
+                        type: object
+                        properties:
+                          href:
+                            type: string
+                            format: uri
+              examples:
+                Example 1:
+                  value:
+                    appliedAuthenticationApproach: REDIRECT
+                    _links:
+                      consentApproval:
+                        href: 'https://example.com/consent-approval'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '500':
+          description: Internal Server Error
+      security:
+        - mTLS: []
+
+  /pisp/public/payment-requests/{id}:
+    get:
+      tags:
+        - pisp
+      summary: Retrieve payment request.
+      description: Retrieve information of an existing payment request.
+      operationId: get-pisp-payment-requests-:id
+      parameters:
+        - name: id
+          in: path
+          description: ID of the payment request (resourceID)
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paymentRequest:
+                    type: object
+                    properties:
+                      resourceId:
+                        type: string
+                        format: uuid
+                      creationDateTime:
+                        type: string
+                        format: date-time
+                      numberOfTransactions:
+                        type: integer
+                        minimum: 1
+                        maximum: 1
+                      paymentInformationStatus:
+                        type: string
+                        enum:
+                          - ACSP
+                          - RJCT
+                          - ACSC
+                          - ACTC
+                      creditTransferTransaction:
+                        $ref: '#/components/schemas/CreditTransferTransaction'
+                      statusReasonInformation:
+                        type: object
+                        properties:
+                          unstructured:
+                            type: string
+                      initiatingParty:
+                        $ref: '#/components/schemas/PartyIdentification'
+              examples:
+                Example 1:
+                  value:
+                    paymentRequest:
+                      resourceId: 026d60bb-63a8-407e-bf67-01dcfc6022e6
+                      creationDateTime: '2019-08-24T14:15:22Z'
+                      numberOfTransactions: 1
+                      paymentInformationStatus: RJCT
+                      statusReasonInformation: AM04
+                      initiatingParty:
+                        name: John Doe
+                        postalAddress:
+                          country: FR
+                        organizationId:
+                          identification: string
+                        lei: string
+                      creditTransferTransaction:
+                        paymentId:
+                          instructionId: ''
+                          endToEndId: ''
+                        transactionStatus: RJCT
+                        instructedAmount:
+                          amount: 13.37
+                          currency: EUR
+                        beneficiary:
+                          creditor:
+                            name: Doe
+                          creditorAccount:
+                            iban: FR291759800001000CRED000061
+                        remittanceInformation:
+                          unstructured: ['string']
+                        cancellableTill: '2019-08-24T14:15:22Z'
+                        requestedExecutionDate: '2019-08-24T14:15:22Z'
+                        acceptanceDateTime: '2019-08-24T14:15:22Z'
+                        debtorDecisionDate: '2019-08-24T14:15:22Z'
+                        appliedExecutionDate: '2019-08-24T14:15:22Z'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples: {}
+      security:
+        - mTLS: []
+
+  /pisp/public/payment-requests/{id}/confirm:
+    post:
+      tags:
+        - pisp
+      summary: Confirm a pending payment request.
+      operationId: post-pisp-payment-requests-id-confirm
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paymentRequest:
+                    type: object
+                    properties:
+                      resourceId:
+                        type: string
+                        format: uuid
+                      creationDateTime:
+                        type: string
+                        format: date-time
+                      numberOfTransactions:
+                        type: integer
+                        minimum: 1
+                        maximum: 1
+                        default: 1
+                      paymentInformationStatus:
+                        type: string
+                        enum:
+                          - ACSP
+                          - RJCT
+                          - ACTC
+                          - ACSC
+                      creditTransferTransaction:
+                        $ref: '#/components/schemas/CreditTransferTransaction'
+              examples:
+                Example 1:
+                  value:
+                    paymentRequest:
+                      resourceId: 026d60bb-63a8-407e-bf67-01dcfc6022e6
+                      creationDateTime: '2019-08-24T14:15:22Z'
+                      numberOfTransactions: 1
+                      paymentInformationStatus: ACSP
+                      creditTransferTransaction:
+                        paymentId:
+                          instructionId: ''
+                          endToEndId: ''
+                        instructedAmount:
+                          amount: 13.37
+                          currency: EUR
+                        beneficiary:
+                          creditor:
+                            name: Doe
+                          creditorAccount:
+                            iban: FR291759800001000CRED000061
+                        transactionStatus: ACTC
+      security:
+        - mTLS: []
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        error_description:
+          type: string
+    OAuthTokenPayload:
+      type: object
+      required:
+        - grant_type
+        - client_id
+        - client_secret
+      properties:
+        grant_type:
+          type: string
+        client_id:
+          type: string
+        client_secret:
+          type: string
+      discriminator:
+        propertyName: grant_type
+        mapping:
+          authorization_code: OAuthAuthorizationCode
+          client_credentials: OAuthClientCredentials
+          refresh_token: OAuthRefreshToken
+    OAuthAuthorizationCode:
+      allOf:
+        - $ref: '#/components/schemas/OAuthTokenPayload'
+        - type: object
+          properties:
+            code:
+              type: string
+            redirect_uri:
+              type: string
+    OAuthClientCredentials:
+      allOf:
+        - $ref: '#/components/schemas/OAuthTokenPayload'
+        - type: object
+          properties:
+            scope:
+              type: string
+    OAuthRefreshToken:
+      allOf:
+        - $ref: '#/components/schemas/OAuthTokenPayload'
+        - type: object
+          properties:
+            refresh_token:
+              type: string
+    OAuthToken:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: number
+        scope:
+          type: string
+    Account:
+      type: object
+      properties:
+        resourceId:
+          type: string
+        bicFi:
+          type: string
+        accountId:
+          type: object
+          properties:
+            iban:
+              type: string
+            currency:
+              type: string
+        name:
+          type: string
+        usage:
+          type: string
+        cashAccountType:
+          type: string
+        psuStatus:
+          type: string
+        balances:
+          type: array
+          items:
+            $ref: '#/components/schemas/Balance'
+    Balance:
+      type: object
+      properties:
+        balanceAmount:
+          type: object
+          $ref: '#/components/schemas/BalanceAmount'
+        balanceType:
+          type: string
+    BalanceAmount:
+      type: object
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+    UserIdentity:
+      type: object
+      properties:
+        fullName:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+    Transaction:
+      type: object
+      properties:
+        resourceId:
+          type: string
+        transactionAmount:
+          type: object
+          $ref: '#/components/schemas/TransactionAmount'
+        creditDebitIndicator:
+          type: string
+        status:
+          type: string
+        transactionDate:
+          type: string
+        bookingDate:
+          type: string
+        bankTransactionCode:
+          type: object
+          properties:
+            family:
+              type: string
+            subFamily:
+              type: string
+            domain:
+              type: string
+        endToEndId:
+          type: string
+        remittanceInfo:
+          type: object
+          properties:
+            unstructured:
+              type: array
+              items:
+                type: string
+    TransactionAmount:
+      type: object
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+    FundsConfirmations:
+      type: object
+      properties:
+        paymentCoverageRequestId:
+          type: string
+        instructedAmount:
+          $ref: '#/components/schemas/InstructedAmount'
+        accountID:
+          $ref: '#/components/schemas/AccountId'
+    InstructedAmount:
+      type: object
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+          enum:
+            - EUR
+    AccountId:
+      properties:
+        Iban:
+          type: string
+    Other:
+      type: object
+      properties:
+        indentification:
+          type: string
+    PaymentRequest:
+      title: PaymentRequest
+      examples:
+        - paymentInformationId: 7903209c-0aeb-4178-aa28-246b4d037aec
+          creationDateTime: '2019-08-24T14:15:22Z'
+          numberOfTransactions: 1
+          initiatingParty:
+            name: Mr Foo
+          paymentTypeInformation:
+            serviceLevel: SEPA
+            categoryPurpose: CASH
+            localInstrument: INST
+          debtor:
+            name: Mr Bar
+          debtorAccount:
+            iban: FR8217598000010000BAR000026
+          paymentInformationStatus: ACTC
+          creditTransferTransaction:
+            - paymentId:
+                instructionId: 13ca1f9f-d1ea-442f-a91c-5b92057f63b7
+                endToEndId: ZA90RH72
+              transactionStatus: ACTC
+              instructedAmount:
+                amount: 13.37
+                currency: EUR
+              beneficiary:
+                creditor:
+                  name: Mr Bar
+                creditorAccount:
+                  iban: FR8217598000010000BAR000026
+          supplementaryData:
+            acceptedAuthenticationApproach:
+              - REDIRECT
+      description: Request for a new credit transfer
+      type: object
+      required:
+        - paymentInformationId
+        - creationDateTime
+        - numberOfTransactions
+        - initiatingParty
+        - paymentTypeInformation
+        - creditTransferTransaction
+        - supplementaryData
+        - paymentInformationStatus
+      properties:
+        paymentInformationId:
+          type: string
+        creationDateTime:
+          type: string
+          format: date-time
+        numberOfTransactions:
+          type: integer
+          minimum: 1
+          maximum: 1
+        initiatingParty:
+          $ref: '#/components/schemas/PartyIdentification'
+        paymentTypeInformation:
+          type: object
+          required:
+            - serviceLevel
+            - categoryPurpose
+            - localInstrument
+          properties:
+            serviceLevel:
+              type: string
+              enum:
+                - SEPA
+            categoryPurpose:
+              type: string
+              enum:
+                - CASH
+                - CORT
+                - DVPM
+                - INTC
+                - SALA
+                - TREA
+            localInstrument:
+              type: string
+              enum:
+                - INST
+        debtor:
+          $ref: '#/components/schemas/PartyIdentification'
+        debtorAccount:
+          $ref: '#/components/schemas/AccountIdentification'
+        creditTransferTransaction:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: '#/components/schemas/CreditTransferTransaction'
+        supplementaryData:
+          type: object
+          required:
+            - acceptedAuthenticationApproach
+          properties:
+            acceptedAuthenticationApproach:
+              type: array
+              items:
+                enum:
+                  - REDIRECT
+                type: string
+        paymentInformationStatus:
+          type: string
+          enum:
+            - ACTC
+            - ACSP
+            - RJCT
+            - ACSC
+        statusReasonInformation:
+          type: string
+          enum:
+            - AG01
+            - AG03
+            - AM02
+            - AM04
+            - FF01
+            - FRAD
+            - MS03
+    CreditTransferTransaction:
+      title: CreditTransferTransaction
+      type: object
+      required:
+        - paymentId
+        - instructedAmount
+        - beneficiary
+        - transactionStatus
+      properties:
+        paymentId:
+          type: object
+          required:
+            - instructionId
+            - endToEndId
+          properties:
+            instructionId:
+              type: string
+            endToEndId:
+              type: string
+        instructedAmount:
+          $ref: '#/components/schemas/InstructedAmount'
+        beneficiary:
+          type: object
+          required:
+            - creditor
+            - creditorAccount
+          properties:
+            creditor:
+              $ref: '#/components/schemas/PartyIdentification'
+            creditorAccount:
+              $ref: '#/components/schemas/AccountIdentification'
+        transactionStatus:
+          type: string
+          enum:
+            - ACTC
+            - ACSP
+            - RJCT
+            - ACSC
+        remittanceInformation:
+          type: object
+          properties:
+            unstructured:
+              type: array
+              items:
+                type: string
+        cancellableTill:
+          type: string
+          format: date-time
+        requestedExecutionDate:
+          type: string
+          format: date-time
+        acceptanceDateTime:
+          type: string
+          format: date-time
+        debtorDecisionDate:
+          type: string
+          format: date-time
+        appliedExecutionDate:
+          type: string
+          format: date-time
+    PartyIdentification:
+      title: PartyIdentification
+      type: object
+      properties:
+        name:
+          type: string
+          example: John Doe
+        postalAddress:
+          type: object
+          properties:
+            country:
+              type: string
+              example: FR
+        organizationId:
+          type: object
+          properties:
+            identification:
+              type: string
+        lei:
+          type: string
+      examples:
+        - name: John Doe
+          postalAddress:
+            country: FR
+          organizationId:
+            identification: string
+          lei: string
+    AccountIdentification:
+      title: AccountIdentification
+      type: object
+      properties:
+        iban:
+          type: string
+
+  responses:
+    AccountList:
+      description: List of accounts
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              accounts:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Account'
+      links:
+        self:
+          operationId: getAccountList
+    EndUserIdentity:
+      description: End user identity
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              identity:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserIdentity'
+      links:
+        self:
+          operationId: getEndUserIdentity
+    TransactionList:
+      description: List of account transactions
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              transactions:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transaction'
+      links:
+        self:
+          operationId: getEndUserIdentity
+        next:
+          operationId: getEndUserIdentity
+        prev:
+          operationId: getEndUserIdentity
+    FundsConfirmations:
+      description: Funds confirmations
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              request:
+                $ref: '#/components/schemas/FundsConfirmations'
+              result:
+                type: boolean
+      links:
+        self:
+          operationId: getFundsConfirmation
+
+  securitySchemes:
+    mTLS:
+      type: mutualTLS
+    psu_oauth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://openauth.lydia-app.com/authorize/login
+          tokenUrl: https://openbanking.lydia-app.com:8082/openbanking/oauth/v2/token
+          scopes:
+            aisp: Retrieval of user identity, account list and transaction set.
+            cbpii: Payment coverage check request.
+            pisp: Payment request initiation, retrieval, confirmation and cancellation.
