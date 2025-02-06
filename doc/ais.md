@@ -37,7 +37,7 @@ Note that we only provide PSU consent from the Lydia mobile application.
 #### PSU consent page redirection
 > Request
 ```
-GET https://openauth.lydia-app.com/authorization/login
+GET https://lydia-app.com/site/open/dispatch/openauth
     ?client_id=65904271c7f48ee638a684f55f76a92a1c7ecc7a0c56e5c0a1b83e2510efcb4d
     &redirect_uri=https%3A%2F%2Ftpp.com
     &state=123456
