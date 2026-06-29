@@ -57,7 +57,7 @@ sequenceDiagram
     TPP ->> PIS: POST /openbanking/oauth/v2/token
     PIS -->> TPP: HTTP-200 with PSU token
 
-    TPP ->> PIS: POST /pisp/public/payment-requests/{payment_request_id}/confirm
+    TPP ->> PIS: POST /pisp/public/payment-requests/{payment_request_id}/confirmation
     PIS -->> TPP: HTTP 200 - transfer is sent
 ```
 
@@ -223,7 +223,7 @@ Response:
 
 **This route is using mTLS authentication. You must provide your QWAC certificate.**
 
-> POST https://openbanking.lydia-app.com:8083/pisp/public/payment-requests/{payment_request_id}/confirm
+> POST https://openbanking.lydia-app.com:8083/pisp/public/payment-requests/{payment_request_id}/confirmation
 
 Note: This should be the `payment_request_id` you've extracted at [Create payment request](#create-payment-request) step.
 
